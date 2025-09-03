@@ -87,9 +87,9 @@ This corresponds to being bound on the left by s1 and on the right by s2.
 
 .. code-block:: python3
 
-    mcdc.cell([+s1, -s2], m2)
-    mcdc.cell([+s2, -s3], m3)
-    mcdc.cell([+s3, -s4], m1)
+    mcdc.cell(+s1 & -s2, m2)
+    mcdc.cell(+s2 & -s3, m3)
+    mcdc.cell(+s3 & -s4, m1)
 
 We define a uniform isotropic source throughout the domain:
 
@@ -97,16 +97,15 @@ We define a uniform isotropic source throughout the domain:
 
     mcdc.source(z=[0.0, 6.0], isotropic=True)
 
-Next we set tallies and specify the specific parameters of interest. Here, we're interested in the time- and space-averaged flux
-and current. We set up two meshes on which to tally, using Numpy arrays: along the z-axis from 0.0 to 6.0, and along the mu axis between -1 and 1.
+Next we set tallies and specify the specific parameters of interest. Here, we're interested in the time- and space-averaged flux. We set up two meshes on which to tally, using Numpy arrays: along the z-axis from 0.0 to 6.0, and along the mu axis between -1 and 1.
 Regardless of problem specifics, particles are simulated through all space, direction, and time;
 the tally definitions are used to indicate in which dimensions a record of particle behavior should be kept.
 
 .. code-block:: python3
 
-    # Tally: cell-average fluxes and currents
+    # Tally: cell-average flux
     mcdc.tally(
-        scores=["flux", "current"],
+        scores=["flux"],
         z=np.linspace(0.0, 6.0, 61),
         mu=np.linspace(-1.0, 1.0, 32 + 1),
     )
@@ -149,9 +148,9 @@ Put together, our example ``input.py`` file:
     s4 = mcdc.surface("plane-z", z=6.0, bc="vacuum")
 
     # Set cells
-    mcdc.cell([+s1, -s2], m2)
-    mcdc.cell([+s2, -s3], m3)
-    mcdc.cell([+s3, -s4], m1)
+    mcdc.cell(+s1 & -s2, m2)
+    mcdc.cell(+s2 & -s3, m3)
+    mcdc.cell(+s3 & -s4, m1)
 
     # =============================================================================
     # Set source
@@ -164,9 +163,9 @@ Put together, our example ``input.py`` file:
     # Set tally, setting, and run mcdc
     # =============================================================================
 
-    # Tally: cell-average fluxes and currents
+    # Tally: cell-average flux
     mcdc.tally(
-        scores=["flux", "current"],
+        scores=["flux"],
         z=np.linspace(0.0, 6.0, 61),
         mu=np.linspace(-1.0, 1.0, 32 + 1),
     )
@@ -215,18 +214,18 @@ Data can be pulled from an ``.h5`` file using something like,
     import numpy as np
     # Load results
     with h5py.File("output.h5", "r") as f:
-        z = f["tally/grid/z"][:]
+        z = f["tallies/mesh_tally_0/grid/z"][:]
         dz = z[1:] - z[:-1]
         z_mid = 0.5 * (z[:-1] + z[1:])
 
-        mu = f["tally/grid/mu"][:]
+        mu = f["tallies/mesh_tally_0/grid/mu"][:]
         dmu = mu[1:] - mu[:-1]
         mu_mid = 0.5 * (mu[:-1] + mu[1:])
 
-        psi = f["tally/flux/mean"][:]
-        psi_sd = f["tally/flux/sdev"][:]
-        J = f["tally/current/mean"][:, 2]
-        J_sd = f["tally/current/sdev"][:, 2]  
+        psi = f["tallies/mesh_tally_0/flux/mean"][:]
+        psi_sd = f["tallies/mesh_tally_0/flux/sdev"][:]
+        psi = np.transpose(psi)
+        psi_sd = np.transpose(psi_sd)
 
 While there can be some nuance to the dimensions of these data arrays, the folder structures should be evident from your tally settings.
 You can see the structure of the file layer-by-layer using the ``keys`` attribute of an h5 group.
@@ -234,13 +233,19 @@ For example, ``f.keys()`` will return
 
 .. code-block:: bash
 
-    <KeysViewHDF5 ['input_deck', 'runtime', 'tally']>
+    <KeysViewHDF5 ['input_deck', 'runtime', 'tallies', 'version']>
 
-and ``f['tally'].keys()`` will return
+whereas ``f['tallies'].keys()`` will return
 
 .. code-block:: bash
 
-    <KeysViewHDF5 ['current', 'flux', 'grid']>
+    <KeysViewHDF5 ['cell_tally_0', 'mesh_tally_0']>
+
+and ``f['tallies/mesh_tally_0'].keys()`` will return
+
+.. code-block:: bash
+
+    <KeysViewHDF5 ['flux', 'grid']>
 
 If needed, you can look around a ``.h5`` file using something like `h5Viewer <https://www.hdfgroup.org/download-hdfview/>`_ (which on linux can be installed with ``sudo apt-get install hdfview``).
 Otherwise these arrays can then be manipulated and modified like any other.
@@ -257,16 +262,35 @@ As the problem we ran above is pretty simple and has no scattering or fission, w
 
     from reference import reference
 
-In the script below, we plot the space-averaged flux and space-averaged current, including their statistical noise.
-We also use the space-averaged flux and current to compute a new quantity, the space-averaged angular flux, and
+In the script below, we plot the space-averaged flux and its statistical noise.
+We also use this space-averaged flux to compute a new quantity, the space-averaged angular flux, and
 plot it over space and angle in a heat map.
+The ``.h5`` file whose keys were previously printed is loaded here.
 Remember that when reporting results from a Monte Carlo solver, you should **always include the statistical error!**
 
 
 .. code-block:: python3
 
     import matplotlib.pyplot as plt
+    import h5py
     import numpy as np
+
+    from reference import reference
+
+    # Load results
+    with h5py.File("output.h5", "r") as f:
+        z = f["tallies/mesh_tally_0/grid/z"][:]
+        dz = z[1:] - z[:-1]
+        z_mid = 0.5 * (z[:-1] + z[1:])
+
+        mu = f["tallies/mesh_tally_0/grid/mu"][:]
+        dmu = mu[1:] - mu[:-1]
+        mu_mid = 0.5 * (mu[:-1] + mu[1:])
+
+        psi = f["tallies/mesh_tally_0/flux/mean"][:]
+        psi_sd = f["tallies/mesh_tally_0/flux/sdev"][:]
+        psi = np.transpose(psi)
+        psi_sd = np.transpose(psi_sd)
 
     I = len(z) - 1
     N = len(mu) - 1
@@ -281,14 +305,12 @@ Remember that when reporting results from a Monte Carlo solver, you should **alw
     # Normalize
     phi /= dz
     phi_sd /= dz
-    J /= dz
-    J_sd /= dz
     for n in range(N):
         psi[:, n] = psi[:, n] / dz / dmu[n]
         psi_sd[:, n] = psi_sd[:, n] / dz / dmu[n]
 
     # Reference solution
-    phi_ref, J_ref, psi_ref = reference(z, mu)
+    phi_ref, _, psi_ref = reference(z, mu)
 
     # Flux - spatial average
     plt.plot(z_mid, phi, "-b", label="MC")
@@ -300,18 +322,6 @@ Remember that when reporting results from a Monte Carlo solver, you should **alw
     plt.grid()
     plt.legend()
     plt.title(r"$\bar{\phi}_i$")
-    plt.show()
-
-    # Current - spatial average
-    plt.plot(z_mid, J, "-b", label="MC")
-    plt.fill_between(z_mid, J - J_sd, J + J_sd, alpha=0.2, color="b")
-    plt.plot(z_mid, J_ref, "--r", label="Ref.")
-    plt.xlabel(r"$z$, cm")
-    plt.ylabel("Current")
-    plt.ylim([-0.03, 0.045])
-    plt.grid()
-    plt.legend()
-    plt.title(r"$\bar{J}_i$")
     plt.show()
 
     # Angular flux - spatial average
@@ -340,9 +350,6 @@ But at the end we have something like this.
 .. image:: ../images/user/sf_slab_1.png
    :width: 266
    :alt: Reference v computed scalar flux, 1e3 particles
-.. image:: ../images/user/j_slab_1.png
-   :width: 266
-   :alt: Reference v computed current, 1e3 particles
 .. image:: ../images/user/af_slab_1.png
    :width: 266
    :alt: Reference v computed angular flux, 1e3 particles
@@ -354,9 +361,6 @@ Here's results from the same simulation run with 1e6 particles:
 .. image:: ../images/user/sf_slab_2.png
    :width: 266
    :alt: Reference v computed scalar flux, 1e6 particles
-.. image:: ../images/user/j_slab_2.png
-   :width: 266
-   :alt: Reference v computed current, 1e6 particles
 .. image:: ../images/user/af_slab_2.png
    :width: 266
    :alt: Reference v computed angular flux, 1e6 particles
@@ -364,7 +368,3 @@ Here's results from the same simulation run with 1e6 particles:
 This is much better converged around the analytic solution.
 As with everything else, the best way to see what you can do is sniff around the examples.
 We have examples with animated solutions, subplots, moving regions and more!
-
--------------------------------------
-MC/DC's built in model ``visualizer``
--------------------------------------
